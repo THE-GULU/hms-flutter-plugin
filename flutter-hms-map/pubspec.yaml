@@ -20,6 +20,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      ohos:
+        package: com.huawei.hms.flutter.map
+        pluginClass: HmsMapOhosPlugin
       android:
         package: com.huawei.hms.flutter.map
         pluginClass: HmsMap

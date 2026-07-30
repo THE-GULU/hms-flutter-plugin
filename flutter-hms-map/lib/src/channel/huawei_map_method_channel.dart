@@ -650,6 +650,15 @@ abstract class _HuaweiMapMethodChannel {
     Set<Factory<OneSequenceGestureRecognizer>>? gestureRecognizers,
     PlatformViewCreatedCallback onPlatformViewCreated,
   ) {
+    if (defaultTargetPlatform == TargetPlatform.ohos) {
+      return OhosView(
+        viewType: _mapChannel,
+        onPlatformViewCreated: onPlatformViewCreated,
+        creationParams: creationParams,
+        creationParamsCodec: const StandardMessageCodec(),
+      );
+    }
+
     return PlatformViewLink(
       viewType: _mapChannel,
       surfaceFactory: (
