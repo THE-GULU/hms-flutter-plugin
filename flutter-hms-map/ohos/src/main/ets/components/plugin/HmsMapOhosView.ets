@@ -56,6 +56,17 @@ class MarkerTag {
   id: string = '';
 }
 
+enum MarkerIconPayloadType {
+  NONE = 0,
+  DEFAULT_MARKER = 1,
+  FROM_BYTES = 2,
+}
+
+class MarkerIconPayload {
+  type: MarkerIconPayloadType = MarkerIconPayloadType.NONE;
+  icon: image.PixelMap | undefined = undefined;
+}
+
 @Observed
 class HmsMapRuntimeState {
   ready: boolean = false;
@@ -78,6 +89,9 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
   };
 
   private controller: map.MapComponentController | undefined = undefined;
+  private lastOptions: Map<string, Object> | undefined = undefined;
+  private myLocationButtonClickEventEnabled: boolean = false;
+  private myLocationButtonClickRegistered: boolean = false;
   private markerPayloadByFlutterId: Map<string, Map<string, Object>> = new Map<string, Map<string, Object>>();
   private markerByFlutterId: Map<string, map.Marker> = new Map<string, map.Marker>();
   private markerFlutterIdByNativeId: Map<string, string> = new Map<string, string>();
@@ -100,6 +114,7 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
 
     const options = params.get('options') as Map<string, Object> | undefined;
     if (options != undefined) {
+      this.lastOptions = options;
       this.applyMapOptions(options);
     }
 
@@ -123,6 +138,7 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
       case METHOD_MAP_UPDATE: {
         const options = call.argument('options') as Map<string, Object> | undefined;
         if (options != undefined) {
+          this.lastOptions = options;
           this.applyMapOptions(options);
         }
         result.success(null);
@@ -267,6 +283,12 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     }
     if (options.has('myLocationButtonEnabled') && controller != undefined) {
       controller.setMyLocationControlsEnabled(Boolean(options.get('myLocationButtonEnabled')));
+    }
+    if (options.has('myLocationButtonClickEventEnabled')) {
+      this.myLocationButtonClickEventEnabled = Boolean(options.get('myLocationButtonClickEventEnabled'));
+      if (controller != undefined) {
+        this.registerMyLocationButtonClickListener(controller);
+      }
     }
     if (options.has('trafficEnabled') && controller != undefined) {
       controller.setTrafficEnabled(Boolean(options.get('trafficEnabled')));
@@ -413,50 +435,54 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
   }
 
   private async applyMarkerToDelegate(marker: map.Marker, payload: Map<string, Object>): Promise<void> {
+    const markerIconPayload = await this.toMarkerIconPayload(payload);
+    let markerDelegate = marker;
+    if (markerIconPayload.type == MarkerIconPayloadType.DEFAULT_MARKER) {
+      markerDelegate = await this.resetMarkerToDefaultIcon(markerDelegate, payload);
+    }
     if (payload.has('position')) {
-      marker.setPosition(this.toLatLng(payload.get('position') as Array<number>));
+      markerDelegate.setPosition(this.toLatLng(payload.get('position') as Array<number>));
     }
     if (payload.has('alpha')) {
-      marker.setAlpha(Number(payload.get('alpha')));
+      markerDelegate.setAlpha(Number(payload.get('alpha')));
     }
     if (payload.has('zIndex')) {
-      marker.setZIndex(Number(payload.get('zIndex')));
+      markerDelegate.setZIndex(Number(payload.get('zIndex')));
     }
     if (payload.has('clickable')) {
-      marker.setClickable(Boolean(payload.get('clickable')));
+      markerDelegate.setClickable(Boolean(payload.get('clickable')));
     }
     if (payload.has('draggable')) {
-      marker.setDraggable(Boolean(payload.get('draggable')));
+      markerDelegate.setDraggable(Boolean(payload.get('draggable')));
     }
     if (payload.has('flat')) {
-      marker.setFlat(Boolean(payload.get('flat')));
+      markerDelegate.setFlat(Boolean(payload.get('flat')));
     }
     if (payload.has('rotation')) {
-      marker.setRotation(Number(payload.get('rotation')));
+      markerDelegate.setRotation(Number(payload.get('rotation')));
     }
-    const icon = await this.toMarkerIcon(payload);
-    if (icon != undefined) {
-      await marker.setIcon(icon);
+    if (markerIconPayload.type == MarkerIconPayloadType.FROM_BYTES && markerIconPayload.icon != undefined) {
+      await markerDelegate.setIcon(markerIconPayload.icon);
     }
     const anchor = payload.get('anchor') as Array<number> | undefined;
     if (anchor != undefined && anchor.length >= 2) {
-      marker.setMarkerAnchor(Number(anchor[0]), Number(anchor[1]));
+      markerDelegate.setMarkerAnchor(Number(anchor[0]), Number(anchor[1]));
     }
     const infoWindow = payload.get('infoWindow') as Map<string, Object> | undefined;
     if (infoWindow != undefined) {
       if (infoWindow.has('title')) {
-        marker.setTitle(String(infoWindow.get('title')));
+        markerDelegate.setTitle(String(infoWindow.get('title')));
       }
       if (infoWindow.has('snippet')) {
-        marker.setSnippet(String(infoWindow.get('snippet')));
+        markerDelegate.setSnippet(String(infoWindow.get('snippet')));
       }
       const infoAnchor = infoWindow.get('anchor') as Array<number> | undefined;
       if (infoAnchor != undefined && infoAnchor.length >= 2) {
-        marker.setInfoWindowAnchor(Number(infoAnchor[0]), Number(infoAnchor[1]));
+        markerDelegate.setInfoWindowAnchor(Number(infoAnchor[0]), Number(infoAnchor[1]));
       }
     }
     if (payload.has('visible')) {
-      marker.setVisible(Boolean(payload.get('visible')));
+      markerDelegate.setVisible(Boolean(payload.get('visible')));
     }
   }
 
@@ -466,28 +492,55 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
   }
 
   private async toMarkerIcon(payload: Map<string, Object>): Promise<image.PixelMap | undefined> {
+    const markerIconPayload = await this.toMarkerIconPayload(payload);
+    return markerIconPayload.icon;
+  }
+
+  private async toMarkerIconPayload(payload: Map<string, Object>): Promise<MarkerIconPayload> {
     const iconPayload = payload.get('icon');
+    const markerIconPayload = new MarkerIconPayload();
     if (iconPayload == undefined) {
-      return undefined;
+      return markerIconPayload;
     }
 
     const iconData = iconPayload as Array<Object>;
-    if (iconData.length < 2) {
-      return undefined;
-    }
-
     const iconType = String(iconData[0]);
-    if (iconType != 'fromBytes') {
-      return undefined;
+    if (iconType == 'defaultMarker') {
+      markerIconPayload.type = MarkerIconPayloadType.DEFAULT_MARKER;
+      return markerIconPayload;
+    }
+    if (iconType != 'fromBytes' || iconData.length < 2) {
+      return markerIconPayload;
     }
 
     const buffer = this.toArrayBuffer(iconData[1]);
     if (buffer == undefined) {
-      return undefined;
+      return markerIconPayload;
     }
 
     const imageSource = image.createImageSource(buffer);
-    return await imageSource.createPixelMap();
+    markerIconPayload.type = MarkerIconPayloadType.FROM_BYTES;
+    markerIconPayload.icon = await imageSource.createPixelMap();
+    return markerIconPayload;
+  }
+
+  private async resetMarkerToDefaultIcon(marker: map.Marker, payload: Map<string, Object>): Promise<map.Marker> {
+    const controller = this.controller;
+    const flutterId = this.resolveFlutterMarkerId(marker);
+    const nativeId = marker.getId();
+    if (controller == undefined || flutterId.length == 0) {
+      return marker;
+    }
+    this.markerFlutterIdByNativeId.delete(nativeId);
+    marker.remove();
+    const markerOptions = await this.toMarkerOptions(payload);
+    const updatedMarker = await controller.addMarker(markerOptions);
+    const markerTag = new MarkerTag();
+    markerTag.id = flutterId;
+    updatedMarker.setTag(markerTag);
+    this.markerByFlutterId.set(flutterId, updatedMarker);
+    this.markerFlutterIdByNativeId.set(updatedMarker.getId(), flutterId);
+    return updatedMarker;
   }
 
   private toArrayBuffer(value: Object): ArrayBuffer | undefined {
@@ -688,9 +741,7 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
       this.channel.invokeMethod(EVENT_MY_LOCATION_CLICK, payload);
     });
 
-    controller.on('myLocationButtonClick', () => {
-      this.channel.invokeMethod(EVENT_MY_LOCATION_BUTTON_CLICK, true);
-    });
+    this.registerMyLocationButtonClickListener(controller);
 
     controller.on('markerClick', (marker: map.Marker) => {
       const flutterId = this.resolveFlutterMarkerId(marker);
@@ -729,6 +780,17 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     });
   }
 
+  private registerMyLocationButtonClickListener(controller: map.MapComponentController): void {
+    if (!this.myLocationButtonClickEventEnabled || this.myLocationButtonClickRegistered) {
+      return;
+    }
+    this.myLocationButtonClickRegistered = true;
+    controller.on('myLocationButtonClick', (): boolean => {
+      this.channel.invokeMethod(EVENT_MY_LOCATION_BUTTON_CLICK, false);
+      return false;
+    });
+  }
+
   private resolveFlutterMarkerId(marker: map.Marker): string {
     const nativeId = marker.getId();
     const byNative = this.markerFlutterIdByNativeId.get(nativeId);
@@ -757,7 +819,12 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     }
     this.controller = controller;
     this.runtimeState.ready = true;
-    this.applyMapOptions(new Map<string, Object>());
+    const options = this.lastOptions;
+    if (options != undefined) {
+      this.applyMapOptions(options);
+    } else {
+      this.applyMapOptions(new Map<string, Object>());
+    }
     this.registerEvents(controller);
     this.syncMarkers();
     Log.i(TAG, 'Map component ready');
@@ -779,6 +846,7 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     this.channel.setMethodCallHandler(null);
     this.controller = undefined;
     this.eventsRegistered = false;
+    this.myLocationButtonClickRegistered = false;
   }
 }
 

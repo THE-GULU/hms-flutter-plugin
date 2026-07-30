@@ -105,6 +105,8 @@ abstract class _Param {
   static const String myLocationEnabled = 'myLocationEnabled';
 
   static const String myLocationButtonEnabled = 'myLocationButtonEnabled';
+  static const String myLocationButtonClickEventEnabled =
+      'myLocationButtonClickEventEnabled';
 
   static const String padding = 'padding';
 

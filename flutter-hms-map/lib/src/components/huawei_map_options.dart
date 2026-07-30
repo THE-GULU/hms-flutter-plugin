@@ -31,6 +31,7 @@ class HuaweiMapOptions {
   final bool? zoomGesturesEnabled;
   final bool? myLocationEnabled;
   final bool? myLocationButtonEnabled;
+  final bool? myLocationButtonClickEventEnabled;
   final EdgeInsets? padding;
   final bool? trafficEnabled;
   final bool? markersClusteringEnabled;
@@ -64,6 +65,7 @@ class HuaweiMapOptions {
     this.zoomGesturesEnabled,
     this.myLocationEnabled,
     this.myLocationButtonEnabled,
+    this.myLocationButtonClickEventEnabled,
     this.padding,
     this.trafficEnabled,
     this.markersClusteringEnabled,
@@ -99,6 +101,7 @@ class HuaweiMapOptions {
       zoomGesturesEnabled: map.zoomGesturesEnabled,
       myLocationEnabled: map.myLocationEnabled,
       myLocationButtonEnabled: map.myLocationButtonEnabled,
+      myLocationButtonClickEventEnabled: map.onMyLocationButtonClick != null,
       padding: map.padding,
       trafficEnabled: map.trafficEnabled,
       markersClusteringEnabled: map.markersClusteringEnabled,
@@ -165,6 +168,11 @@ class HuaweiMapOptions {
       optionsMap,
       _Param.myLocationButtonEnabled,
       myLocationButtonEnabled,
+    );
+    addToMap(
+      optionsMap,
+      _Param.myLocationButtonClickEventEnabled,
+      myLocationButtonClickEventEnabled,
     );
     addToMap(optionsMap, _Param.padding, <double>[
       padding!.top,
