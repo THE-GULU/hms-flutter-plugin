@@ -1,0 +1,10 @@
+{
+  "module": {
+    "name": "huawei_account",
+    "type": "har",
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ]
+  }
+}

@@ -23,6 +23,8 @@ flutter:
       android:
         package: com.huawei.hms.flutter.account
         pluginClass: HmsAccountPlugin
+      ohos:
+        pluginClass: HmsAccountOhosPlugin
 
   assets:
     - packages/huawei_account/src/ui/logo.png

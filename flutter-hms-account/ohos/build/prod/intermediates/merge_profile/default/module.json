@@ -1,0 +1,28 @@
+{
+	"app": {
+		"bundleName": "com.thegulu.app",
+		"debug": false,
+		"versionCode": 607,
+		"versionName": "4.5.19",
+		"minAPIVersion": 50100018,
+		"targetAPIVersion": 50100018,
+		"apiReleaseType": "Release",
+		"targetMinorAPIVersion": 0,
+		"targetPatchAPIVersion": 0,
+		"compileSdkVersion": "6.1.1.125",
+		"compileSdkType": "HarmonyOS",
+		"appEnvironments": [],
+		"bundleType": "app",
+		"buildMode": "release"
+	},
+	"module": {
+		"name": "huawei_account",
+		"type": "har",
+		"deviceTypes": [
+			"default",
+			"tablet"
+		],
+		"packageName": "huawei_account",
+		"installationFree": false
+	}
+}
