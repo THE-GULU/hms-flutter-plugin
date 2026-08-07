@@ -23,3 +23,5 @@ flutter:
       android:
         package: com.huawei.hms.flutter.push
         pluginClass: PushPlugin
+      ohos:
+        pluginClass: HmsPushOhosPlugin

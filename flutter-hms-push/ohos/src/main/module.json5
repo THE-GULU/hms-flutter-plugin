@@ -1,0 +1,10 @@
+{
+  "module": {
+    "name": "huawei_push",
+    "type": "har",
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ]
+  }
+}

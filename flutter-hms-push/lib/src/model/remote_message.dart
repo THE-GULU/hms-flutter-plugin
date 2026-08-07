@@ -143,11 +143,7 @@ class RemoteMessage {
       type: map[RemoteMessage.MESSAGE_TYPE],
       collapseKey: map[RemoteMessage.COLLAPSE_KEY],
       data: map[RemoteMessage.DATA],
-      dataOfMap: map[RemoteMessage.DATA_OF_MAP] != null
-          ? Map<String, String>.from(
-              json.decode(map[RemoteMessage.DATA_OF_MAP]),
-            )
-          : null,
+      dataOfMap: _parseStringMap(map[RemoteMessage.DATA_OF_MAP]),
       notification: map[RemoteMessage.NOTIFICATION] != null
           ? RemoteMessageNotification._fromMap(
               map[RemoteMessage.NOTIFICATION],
@@ -156,11 +152,37 @@ class RemoteMessage {
       sendMode: map[RemoteMessage.SEND_MODE],
       receiptMode: map[RemoteMessage.RECEIPT_MODE],
       analyticInfo: map[RemoteMessage.ANALYTICS_INFO],
-      analyticInfoMap: map[RemoteMessage.ANALYTIC_INFO_MAP] != null
-          ? Map<String, String>.from(
-              map[RemoteMessage.ANALYTIC_INFO_MAP],
-            )
-          : null,
+      analyticInfoMap: _parseStringMap(map[RemoteMessage.ANALYTIC_INFO_MAP]),
+    );
+  }
+
+  static Map<String, String>? _parseStringMap(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    dynamic decoded = value;
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      try {
+        decoded = json.decode(trimmed);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    if (decoded is! Map) {
+      return null;
+    }
+
+    return decoded.map(
+      (key, dynamic item) => MapEntry(
+        key.toString(),
+        item is String ? item : json.encode(item),
+      ),
     );
   }
 

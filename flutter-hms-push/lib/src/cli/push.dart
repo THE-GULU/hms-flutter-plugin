@@ -91,6 +91,16 @@ abstract class Push {
     );
   }
 
+  /// Requests notification permission on HarmonyOS.
+  ///
+  /// Returns false for platforms that do not expose this method.
+  static Future<bool> requestPermission() async {
+    final bool? result = await _methodChannel.invokeMethod(
+      'requestPermission',
+    );
+    return result ?? false;
+  }
+
   /// Obtains the generation timestamp of an AAID.
   static Future<String> getCreationTime() async {
     final String? result = await _methodChannel.invokeMethod(
@@ -157,7 +167,13 @@ abstract class Push {
   static Stream<RemoteMessage> get onMessageReceivedStream {
     return _remoteMessageReceiveEventChannel
         .receiveBroadcastStream()
-        .map((dynamic event) => RemoteMessage._fromMap(json.decode(event)));
+        .map((dynamic event) {
+      final decoded = event is String ? json.decode(event) : event;
+      if (decoded is Map) {
+        return RemoteMessage._fromMap(Map<dynamic, dynamic>.from(decoded));
+      }
+      return RemoteMessage._fromMap(null);
+    });
   }
 
   /// Obtains the stream of [remoteMessageSendStatusEventChannel].
