@@ -157,6 +157,7 @@ class NotificationOpenStreamHandler implements StreamHandler {
 let activePlugin: HmsPushOhosPlugin | null = null;
 const pendingForegroundPayloads: Object[] = [];
 let abilityReceiveMessageRegistered: boolean = false;
+let pendingLaunchWant: Want | null = null;
 
 export default class HmsPushOhosPlugin
   implements FlutterPlugin, MethodCallHandler, AbilityAware, NewWantListener {
@@ -179,6 +180,20 @@ export default class HmsPushOhosPlugin
   private initialNotification: NotificationOpenPayload | null = null;
   private initialIntent: string | null = null;
   private pushReceiverRegistered: boolean = false;
+
+  /**
+   * Capture notification-open Want from Ability.onCreate (cold start) or
+   * Ability.onNewWant (warm/background). Cold start never goes through
+   * Flutter NewWantListener alone.
+   */
+  static captureLaunchWant(want: Want): void {
+    if (activePlugin != null) {
+      activePlugin.captureNotificationOpen(want);
+      return;
+    }
+    pendingLaunchWant = want;
+    Log.i(TAG, 'Queued launch Want for notification open (plugin not ready).');
+  }
 
   /**
    * Must be called from EntryAbility.onCreate with the Ability that declares
@@ -314,6 +329,11 @@ export default class HmsPushOhosPlugin
     this.uiContext = binding.getAbility().context;
     binding.addOnNewWantListener(this);
     this.registerPushCallbacksIfNeeded();
+    if (pendingLaunchWant != null) {
+      const launchWant = pendingLaunchWant;
+      pendingLaunchWant = null;
+      this.captureNotificationOpen(launchWant);
+    }
   }
 
   onReattachedToAbilityForConfigChanges(binding: AbilityPluginBinding): void {
@@ -354,9 +374,15 @@ export default class HmsPushOhosPlugin
         case 'requestPermission':
           await this.requestPermission(result);
           return;
-        case 'getInitialNotification':
-          result.success(this.initialNotification);
+        case 'getInitialNotification': {
+          // Return once for cold-start consumers, then clear so warm-start
+          // stream events remain the sole source afterward.
+          const initial = this.initialNotificationToMap();
+          this.initialNotification = null;
+          this.initialIntent = null;
+          result.success(initial);
           return;
+        }
         case 'getInitialIntent':
           result.success(this.initialIntent ?? '');
           return;
@@ -549,23 +575,50 @@ export default class HmsPushOhosPlugin
     }
   }
 
-  private captureNotificationOpen(want: Want): void {
+  captureNotificationOpen(want: Want): void {
     const extras = this.extractWantParameters(want);
+    const uriPage = this.extractWantUri(want);
     const extrasJson = this.safeStringify(extras);
-    if (extrasJson == '{}') {
+    const hasExtras = extrasJson != '{}' && extrasJson.length > 2;
+    if (!hasExtras && uriPage.length === 0) {
+      Log.w(TAG, 'Ignore notification open Want without extras/uri');
       return;
     }
 
     const payload = new NotificationOpenPayload();
-    payload.uriPage = this.extractWantUri(want);
-    payload.extras = extras;
-    payload.remoteMessage = this.buildRemoteMessageFromExtras(extrasJson);
+    payload.uriPage = uriPage;
+    payload.extras = hasExtras ? extras : this.buildExtrasFromUri(uriPage);
+    payload.remoteMessage = this.buildRemoteMessageFromExtras(
+      hasExtras ? extrasJson : this.safeStringify(payload.extras),
+    );
     this.initialIntent = payload.uriPage;
     this.initialNotification = payload;
+    Log.i(
+      TAG,
+      `Captured notification open uri=${uriPage}, extrasLength=${extrasJson.length}`,
+    );
 
     if (this.notificationOpenSink != null) {
-      this.notificationOpenSink.success(this.safeStringify(payload));
+      const openMap = this.initialNotificationToMap();
+      if (openMap != null) {
+        this.notificationOpenSink.success(this.safeStringify(openMap));
+      }
     }
+  }
+
+  private initialNotificationToMap(): Object | null {
+    if (this.initialNotification == null) {
+      return null;
+    }
+    // Serialize via JSON so MethodChannel receives a plain map.
+    return JSON.parse(this.safeStringify(this.initialNotification as Object)) as Object;
+  }
+
+  private buildExtrasFromUri(uriPage: string): Object {
+    if (uriPage.length === 0) {
+      return JSON.parse('{}') as Object;
+    }
+    return JSON.parse(`{"url":${JSON.stringify(uriPage)}}`) as Object;
   }
 
   handleForegroundPayload(payload: Object): void {
