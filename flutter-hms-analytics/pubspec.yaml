@@ -25,3 +25,5 @@ flutter:
         pluginClass: AnalyticsPlugin
       ios:
         pluginClass: AnalyticsPlugin
+      ohos:
+        pluginClass: HmsAnalyticsOhosPlugin
