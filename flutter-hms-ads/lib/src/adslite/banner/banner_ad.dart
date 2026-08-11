@@ -133,9 +133,17 @@ class BannerAd {
   }
 
   /// Displays an ad.
+  ///
+  /// On HarmonyOS, pass [left]/[top]/[width], and [height] (logical px /
+  /// vp) to position the host-side ArkUI overlay. Gravity/offset are used when
+  /// absolute frame values are omitted.
   Future<bool?> show({
     Gravity gravity = Gravity.bottom,
     double offset = 0.0,
+    double? left,
+    double? top,
+    double? width,
+    double? height,
   }) async {
     final bool? result = await Ads.instance.channelBanner.invokeMethod(
       'showBannerAd',
@@ -143,7 +151,23 @@ class BannerAd {
         'id': id,
         'offset': offset.toString(),
         'gravity': describeEnum(gravity),
-        'adType': _adType
+        'adType': _adType,
+        if (left != null) 'left': left,
+        if (top != null) 'top': top,
+        if (width != null) 'width': width,
+        if (height != null) 'height': height,
+      },
+    );
+    return result;
+  }
+
+  /// Hides the OHOS host overlay without disposing the ad instance.
+  Future<bool?> hide() async {
+    final bool? result = await Ads.instance.channelBanner.invokeMethod(
+      'hideBannerAd',
+      <String, dynamic>{
+        'id': id,
+        'adType': _adType,
       },
     );
     return result;

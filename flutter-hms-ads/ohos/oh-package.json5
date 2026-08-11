@@ -1,0 +1,11 @@
+{
+  "name": "huawei_ads",
+  "version": "13.4.72",
+  "description": "OHOS bridge for huawei_ads Flutter plugin (Banner + Interstitial MVP).",
+  "main": "index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ohos/flutter_ohos": "file:./har/flutter.har"
+  }
+}

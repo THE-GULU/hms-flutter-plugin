@@ -1,0 +1,28 @@
+{
+	"app": {
+		"bundleName": "com.thegulu.app.dev",
+		"debug": true,
+		"versionCode": 608,
+		"versionName": "4.5.19",
+		"minAPIVersion": 50100018,
+		"targetAPIVersion": 50100018,
+		"apiReleaseType": "Release",
+		"targetMinorAPIVersion": 0,
+		"targetPatchAPIVersion": 0,
+		"compileSdkVersion": "6.1.1.125",
+		"compileSdkType": "HarmonyOS",
+		"appEnvironments": [],
+		"bundleType": "app",
+		"buildMode": "debug"
+	},
+	"module": {
+		"name": "huawei_ads",
+		"type": "har",
+		"deviceTypes": [
+			"default",
+			"tablet"
+		],
+		"packageName": "huawei_ads",
+		"installationFree": false
+	}
+}

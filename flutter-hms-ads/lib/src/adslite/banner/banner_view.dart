@@ -53,26 +53,38 @@ class BannerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Map<String, dynamic> creationParams = <String, dynamic>{
+      'adSlotId': adSlotId,
+      'bannerSize': adSizeValue,
+      'backgroundColor':
+          backgroundColor != null ? colorHex(backgroundColor!) : null,
+      'refreshTime': refreshDuration?.inSeconds,
+      'loadOnStart': controller != null ? loadOnStart : true,
+      'adParam': adParam?._toMap() ?? <String, dynamic>{},
+    };
+    // Prefer BannerAd.show(...) + host ArkUI overlay on OHOS. PlatformView
+    // hybrid composition is unimplemented; texture cannot paint Ads Kit remote UI.
+    final Widget platformView = defaultTargetPlatform == TargetPlatform.ohos
+        ? OhosView(
+            key: ObjectKey(size),
+            viewType: _BANNER_VIEW,
+            onPlatformViewCreated: controller?._init,
+            creationParamsCodec: const StandardMessageCodec(),
+            creationParams: creationParams,
+          )
+        : AndroidView(
+            key: ObjectKey(size),
+            viewType: _BANNER_VIEW,
+            onPlatformViewCreated: controller?._init,
+            creationParamsCodec: const StandardMessageCodec(),
+            creationParams: creationParams,
+          );
     final Widget bannerWidget = SizedBox(
       width: adSizeDisplayWidth ?? MediaQuery.of(context).size.width,
       height: isSizeDynamic
           ? MediaQuery.of(context).size.height
           : adSizeDisplayHeight(MediaQuery.of(context).size.height),
-      child: AndroidView(
-        key: ObjectKey(size),
-        viewType: _BANNER_VIEW,
-        onPlatformViewCreated: controller?._init,
-        creationParamsCodec: const StandardMessageCodec(),
-        creationParams: <String, dynamic>{
-          'adSlotId': adSlotId,
-          'bannerSize': adSizeValue,
-          'backgroundColor':
-              backgroundColor != null ? colorHex(backgroundColor!) : null,
-          'refreshTime': refreshDuration?.inSeconds,
-          'loadOnStart': controller != null ? loadOnStart : true,
-          'adParam': adParam?._toMap() ?? <String, dynamic>{},
-        },
-      ),
+      child: platformView,
     );
     if (!isSizeDynamic) {
       return bannerWidget;

@@ -1,0 +1,10 @@
+{
+  "module": {
+    "name": "huawei_ads",
+    "type": "har",
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ]
+  }
+}
