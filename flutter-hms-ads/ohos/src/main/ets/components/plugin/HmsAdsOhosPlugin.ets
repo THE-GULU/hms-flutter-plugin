@@ -15,6 +15,16 @@ import {
 import common from '@ohos.app.ability.common';
 import { advertising } from '@kit.AdsKit';
 import { HmsAdsBannerOhosViewFactory } from './HmsAdsBannerOhosViewFactory';
+import {
+  HMS_BANNER_AD_ID,
+  HMS_BANNER_HEIGHT,
+  HMS_BANNER_LEFT,
+  HMS_BANNER_REVEALED,
+  HMS_BANNER_TOKEN,
+  HMS_BANNER_TOP,
+  HMS_BANNER_VISIBLE,
+  HMS_BANNER_WIDTH,
+} from './HmsBannerOverlayStorage';
 
 const TAG = 'HmsAdsOhosPlugin';
 const METHOD_CHANNEL = 'com.huawei.hms.flutter.ads/method';
@@ -27,14 +37,6 @@ const BANNER_VIEW_TYPE = 'com.huawei.hms.flutter.ads/banner/view';
 const AD_TYPE_BANNER = 8;
 const AD_TYPE_INTERSTITIAL = 12;
 
-// Must match ohos/entry/.../ads/HuaweiBannerOverlay.ets keys.
-const HMS_BANNER_VISIBLE = 'hms_banner_visible';
-const HMS_BANNER_AD_ID = 'hms_banner_ad_id';
-const HMS_BANNER_LEFT = 'hms_banner_left';
-const HMS_BANNER_TOP = 'hms_banner_top';
-const HMS_BANNER_WIDTH = 'hms_banner_width';
-const HMS_BANNER_HEIGHT = 'hms_banner_height';
-const HMS_BANNER_TOKEN = 'hms_banner_token';
 let bannerOverlayToken: number = 1;
 
 class AdEventStreamHandler implements StreamHandler {
@@ -132,6 +134,7 @@ export default class HmsAdsOhosPlugin implements FlutterPlugin, MethodCallHandle
 
   private ensureBannerOverlayDefaults(): void {
     AppStorage.setOrCreate(HMS_BANNER_VISIBLE, false);
+    AppStorage.setOrCreate(HMS_BANNER_REVEALED, false);
     AppStorage.setOrCreate(HMS_BANNER_AD_ID, '');
     AppStorage.setOrCreate(HMS_BANNER_LEFT, 0);
     AppStorage.setOrCreate(HMS_BANNER_TOP, 0);
@@ -141,7 +144,9 @@ export default class HmsAdsOhosPlugin implements FlutterPlugin, MethodCallHandle
   }
 
   private hideBannerOverlay(): void {
+    // Full unmount — use only when leaving the route / destroying the ad.
     AppStorage.setOrCreate(HMS_BANNER_VISIBLE, false);
+    AppStorage.setOrCreate(HMS_BANNER_REVEALED, false);
     AppStorage.setOrCreate(HMS_BANNER_AD_ID, '');
   }
 
@@ -151,25 +156,54 @@ export default class HmsAdsOhosPlugin implements FlutterPlugin, MethodCallHandle
     top: number,
     width: number,
     height: number,
-  ): void {
+  ): boolean {
     // HarmonyOS Ads Kit Banner only accepts 360x57 / 360x144.
     const adHeight = height >= 100 ? 144 : 57;
     const previousAdId = AppStorage.get<string>(HMS_BANNER_AD_ID);
     const wasVisible = AppStorage.get<boolean>(HMS_BANNER_VISIBLE) === true;
-    if (!wasVisible || previousAdId !== adSlotId) {
+    const isNewShow = !wasVisible || previousAdId !== adSlotId;
+    if (isNewShow) {
       bannerOverlayToken += 1;
       AppStorage.setOrCreate(HMS_BANNER_TOKEN, bannerOverlayToken);
+      AppStorage.setOrCreate(HMS_BANNER_AD_ID, adSlotId);
+      AppStorage.setOrCreate(HMS_BANNER_WIDTH, width > 0 ? width : 360);
+      AppStorage.setOrCreate(HMS_BANNER_HEIGHT, adHeight);
+      Log.i(
+        TAG,
+        `Banner overlay show slot=${adSlotId} frame=${left},${top} ${width}x${adHeight} token=${bannerOverlayToken}`,
+      );
     }
-    AppStorage.setOrCreate(HMS_BANNER_AD_ID, adSlotId);
+    // Position updates are cheap; avoid rewriting unchanged identity fields.
     AppStorage.setOrCreate(HMS_BANNER_LEFT, left);
     AppStorage.setOrCreate(HMS_BANNER_TOP, top);
-    AppStorage.setOrCreate(HMS_BANNER_WIDTH, width > 0 ? width : 360);
-    AppStorage.setOrCreate(HMS_BANNER_HEIGHT, adHeight);
     AppStorage.setOrCreate(HMS_BANNER_VISIBLE, true);
-    Log.i(
-      TAG,
-      `Banner overlay show slot=${adSlotId} frame=${left},${top} ${width}x${adHeight} token=${bannerOverlayToken}`,
-    );
+    AppStorage.setOrCreate(HMS_BANNER_REVEALED, true);
+    return isNewShow;
+  }
+
+  private updateBannerOverlayFrame(
+    left: number,
+    top: number,
+    width?: number,
+    height?: number,
+    revealed?: boolean,
+  ): void {
+    if (AppStorage.get<boolean>(HMS_BANNER_VISIBLE) !== true) {
+      return;
+    }
+    AppStorage.setOrCreate(HMS_BANNER_LEFT, left);
+    AppStorage.setOrCreate(HMS_BANNER_TOP, top);
+    if (typeof width === 'number' && width > 0) {
+      AppStorage.setOrCreate(HMS_BANNER_WIDTH, width);
+    }
+    if (typeof height === 'number' && height > 0) {
+      const adHeight = height >= 100 ? 144 : 57;
+      AppStorage.setOrCreate(HMS_BANNER_HEIGHT, adHeight);
+    }
+    // Opacity-only toggle keeps AutoAdComponent mounted (no re-impression).
+    if (typeof revealed === 'boolean') {
+      AppStorage.setOrCreate(HMS_BANNER_REVEALED, revealed);
+    }
   }
 
   onDetachedFromEngine(_binding: FlutterPluginBinding): void {
@@ -258,6 +292,9 @@ export default class HmsAdsOhosPlugin implements FlutterPlugin, MethodCallHandle
           break;
         case 'showBannerAd':
           this.showBannerAd(call, result);
+          break;
+        case 'updateBannerAdFrame':
+          this.updateBannerAdFrame(call, result);
           break;
         case 'hideBannerAd':
           this.hideBannerOverlay();
@@ -412,9 +449,32 @@ export default class HmsAdsOhosPlugin implements FlutterPlugin, MethodCallHandle
       top = gravity === 'top' ? offset : Math.max(0, 800 - height - offset);
     }
 
-    this.showBannerOverlay(record.adSlotId, left, top, width, height);
-    this.emit(record.eventSink, 'onAdOpened');
-    this.emit(record.eventSink, 'onAdImpression');
+    const isNewShow = this.showBannerOverlay(record.adSlotId, left, top, width, height);
+    if (isNewShow) {
+      this.emit(record.eventSink, 'onAdOpened');
+      this.emit(record.eventSink, 'onAdImpression');
+    }
+    result.success(true);
+  }
+
+  private updateBannerAdFrame(call: MethodCall, result: MethodResult): void {
+    const args = this.argsMap(call);
+    const leftArg = args.get('left');
+    const topArg = args.get('top');
+    if (typeof leftArg !== 'number' || typeof topArg !== 'number') {
+      result.error('BAD_ARGS', 'left/top are required', null);
+      return;
+    }
+    const widthArg = args.get('width');
+    const heightArg = args.get('height');
+    const revealedArg = args.get('revealed');
+    this.updateBannerOverlayFrame(
+      leftArg,
+      topArg,
+      typeof widthArg === 'number' ? widthArg : undefined,
+      typeof heightArg === 'number' ? heightArg : undefined,
+      typeof revealedArg === 'boolean' ? revealedArg : undefined,
+    );
     result.success(true);
   }
 

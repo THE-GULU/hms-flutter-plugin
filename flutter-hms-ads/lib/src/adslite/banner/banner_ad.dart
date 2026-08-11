@@ -161,6 +161,32 @@ class BannerAd {
     return result;
   }
 
+  /// Updates OHOS overlay frame during scroll without re-firing open/impression.
+  ///
+  /// Pass [revealed] `false` to opacity-hide (e.g. under a sticky header)
+  /// without unmounting [AutoAdComponent], so impressions are not recounted.
+  Future<bool?> updateFrame({
+    required double left,
+    required double top,
+    double? width,
+    double? height,
+    bool? revealed,
+  }) async {
+    final bool? result = await Ads.instance.channelBanner.invokeMethod(
+      'updateBannerAdFrame',
+      <String, dynamic>{
+        'id': id,
+        'adType': _adType,
+        'left': left,
+        'top': top,
+        if (width != null) 'width': width,
+        if (height != null) 'height': height,
+        if (revealed != null) 'revealed': revealed,
+      },
+    );
+    return result;
+  }
+
   /// Hides the OHOS host overlay without disposing the ad instance.
   Future<bool?> hide() async {
     final bool? result = await Ads.instance.channelBanner.invokeMethod(
