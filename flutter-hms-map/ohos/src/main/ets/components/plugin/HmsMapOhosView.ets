@@ -1,5 +1,6 @@
 import common from '@ohos.app.ability.common';
-import PlatformView, { Params } from '@ohos/flutter_ohos/src/main/ets/plugin/platform/PlatformView';
+import PlatformView, { Params, PlatformViewVisibleAreaEventOptions } from '@ohos/flutter_ohos/src/main/ets/plugin/platform/PlatformView';
+import ApplicationStateChangeCallback from '@ohos.app.ability.ApplicationStateChangeCallback';
 import { BinaryMessenger, Log, MethodCall, MethodCallHandler, MethodChannel, MethodResult } from '@ohos/flutter_ohos';
 import { BusinessError } from '@ohos.base';
 import image from '@ohos.multimedia.image';
@@ -96,13 +97,146 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
   private markerByFlutterId: Map<string, map.Marker> = new Map<string, map.Marker>();
   private markerFlutterIdByNativeId: Map<string, string> = new Map<string, string>();
   private eventsRegistered: boolean = false;
+  private released: boolean = false;
+  private mapHidden: boolean = false;
+  private appStateListening: boolean = false;
+  private appStateCallback: ApplicationStateChangeCallback | undefined = undefined;
+  private ownedPixelMaps: Array<image.PixelMap> = [];
+  private mapReadyCallback: (error: BusinessError, controller: map.MapComponentController) => void =
+    (error: BusinessError, controller: map.MapComponentController): void => {
+      if (error != undefined || controller != undefined) {
+        return;
+      }
+    };
+  private cameraMoveStartListener: (reason: number) => void = (reason: number): void => {
+    if (reason < 0) {
+      return;
+    }
+  };
+  private cameraMoveListener: () => void = (): void => {
+  };
+  private cameraIdleListener: () => void = (): void => {
+  };
+  private mapClickListener: (latLng: mapCommon.LatLng) => void = (latLng: mapCommon.LatLng): void => {
+    if (latLng.latitude < -90) {
+      return;
+    }
+  };
+  private mapLongClickListener: (latLng: mapCommon.LatLng) => void = (latLng: mapCommon.LatLng): void => {
+    if (latLng.latitude < -90) {
+      return;
+    }
+  };
+  private poiClickListener: (poi: mapCommon.Poi) => void = (poi: mapCommon.Poi): void => {
+    if (poi.name.length < 0) {
+      return;
+    }
+  };
+  private myLocationClickListener: (latLng: mapCommon.LatLng) => void = (latLng: mapCommon.LatLng): void => {
+    if (latLng.latitude < -90) {
+      return;
+    }
+  };
+  private myLocationButtonClickListener: () => boolean = (): boolean => false;
+  private markerClickListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
+  private infoWindowClickListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
+  private infoWindowCloseListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
+  private markerDragStartListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
+  private markerDragListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
+  private markerDragEndListener: (marker: map.Marker) => void = (marker: map.Marker): void => {
+    marker.getId();
+  };
 
   constructor(context: common.Context, messenger: BinaryMessenger, viewId: number, args: object) {
     super();
     this.context = context;
     this.channel = new MethodChannel(messenger, `${MAP_CHANNEL}_${viewId}`);
+    this.initListeners();
     this.channel.setMethodCallHandler(this);
     this.initFromCreationParams(args);
+    this.registerAppStateListener();
+  }
+
+  private initListeners(): void {
+    this.mapReadyCallback = (error: BusinessError, controller: map.MapComponentController): void => {
+      this.onMapReady(error, controller);
+    };
+    this.cameraMoveStartListener = (reason: number): void => {
+      const payload = new Map<string, Object>();
+      payload.set('reason', reason);
+      this.channel.invokeMethod(EVENT_CAMERA_MOVE_STARTED, payload);
+    };
+    this.cameraMoveListener = (): void => {
+      this.emitCameraPosition();
+    };
+    this.cameraIdleListener = (): void => {
+      this.channel.invokeMethod(EVENT_CAMERA_ON_IDLE, null);
+    };
+    this.mapClickListener = (latLng: mapCommon.LatLng): void => {
+      const payload = new Map<string, Object>();
+      payload.set('position', [latLng.latitude, latLng.longitude]);
+      this.channel.invokeMethod(EVENT_MAP_CLICK, payload);
+    };
+    this.mapLongClickListener = (latLng: mapCommon.LatLng): void => {
+      const payload = new Map<string, Object>();
+      payload.set('position', [latLng.latitude, latLng.longitude]);
+      this.channel.invokeMethod(EVENT_MAP_LONG_CLICK, payload);
+    };
+    this.poiClickListener = (poi: mapCommon.Poi): void => {
+      const poiPayload = new Map<string, Object>();
+      poiPayload.set('name', poi.name);
+      poiPayload.set('placeId', poi.id);
+      poiPayload.set('latLng', [poi.position.latitude, poi.position.longitude]);
+      const payload = new Map<string, Object>();
+      payload.set('pointOfInterest', poiPayload);
+      this.channel.invokeMethod(EVENT_POI_CLICK, payload);
+    };
+    this.myLocationClickListener = (latLng: mapCommon.LatLng): void => {
+      const locationPayload = new Map<string, Object>();
+      locationPayload.set('latitude', latLng.latitude);
+      locationPayload.set('longitude', latLng.longitude);
+      const payload = new Map<string, Object>();
+      payload.set('location', locationPayload);
+      this.channel.invokeMethod(EVENT_MY_LOCATION_CLICK, payload);
+    };
+    this.myLocationButtonClickListener = (): boolean => {
+      this.channel.invokeMethod(EVENT_MY_LOCATION_BUTTON_CLICK, false);
+      return false;
+    };
+    this.markerClickListener = (marker: map.Marker): void => {
+      const payload = new Map<string, Object>();
+      payload.set('markerId', this.resolveFlutterMarkerId(marker));
+      this.channel.invokeMethod(EVENT_MARKER_CLICK, payload);
+    };
+    this.infoWindowClickListener = (marker: map.Marker): void => {
+      const payload = new Map<string, Object>();
+      payload.set('markerId', this.resolveFlutterMarkerId(marker));
+      this.channel.invokeMethod(EVENT_INFO_WINDOW_CLICK, payload);
+    };
+    this.infoWindowCloseListener = (marker: map.Marker): void => {
+      const payload = new Map<string, Object>();
+      payload.set('markerId', this.resolveFlutterMarkerId(marker));
+      this.channel.invokeMethod(EVENT_INFO_WINDOW_CLOSE, payload);
+    };
+    this.markerDragStartListener = (marker: map.Marker): void => {
+      this.channel.invokeMethod(EVENT_MARKER_DRAG_START, this.createMarkerDragPayload(marker));
+    };
+    this.markerDragListener = (marker: map.Marker): void => {
+      this.channel.invokeMethod(EVENT_MARKER_DRAG, this.createMarkerDragPayload(marker));
+    };
+    this.markerDragEndListener = (marker: map.Marker): void => {
+      this.channel.invokeMethod(EVENT_MARKER_DRAG_END, this.createMarkerDragPayload(marker));
+    };
   }
 
   private initFromCreationParams(args: object): void {
@@ -519,8 +653,14 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     }
 
     const imageSource = image.createImageSource(buffer);
-    markerIconPayload.type = MarkerIconPayloadType.FROM_BYTES;
-    markerIconPayload.icon = await imageSource.createPixelMap();
+    try {
+      const pixelMap = await imageSource.createPixelMap();
+      markerIconPayload.type = MarkerIconPayloadType.FROM_BYTES;
+      markerIconPayload.icon = pixelMap;
+      this.ownedPixelMaps.push(pixelMap);
+    } finally {
+      await imageSource.release();
+    }
     return markerIconPayload;
   }
 
@@ -696,88 +836,46 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     }
     this.eventsRegistered = true;
 
-    controller.on('cameraMoveStart', (reason: number) => {
-      const payload = new Map<string, Object>();
-      payload.set('reason', reason);
-      this.channel.invokeMethod(EVENT_CAMERA_MOVE_STARTED, payload);
-    });
-
-    controller.on('cameraMove', () => {
-      this.emitCameraPosition();
-    });
-
-    controller.on('cameraIdle', () => {
-      this.channel.invokeMethod(EVENT_CAMERA_ON_IDLE, null);
-    });
-
-    controller.on('mapClick', (latLng: mapCommon.LatLng) => {
-      const payload = new Map<string, Object>();
-      payload.set('position', [latLng.latitude, latLng.longitude]);
-      this.channel.invokeMethod(EVENT_MAP_CLICK, payload);
-    });
-
-    controller.on('mapLongClick', (latLng: mapCommon.LatLng) => {
-      const payload = new Map<string, Object>();
-      payload.set('position', [latLng.latitude, latLng.longitude]);
-      this.channel.invokeMethod(EVENT_MAP_LONG_CLICK, payload);
-    });
-
-    controller.on('poiClick', (poi: mapCommon.Poi) => {
-      const poiPayload = new Map<string, Object>();
-      poiPayload.set('name', poi.name);
-      poiPayload.set('placeId', poi.id);
-      poiPayload.set('latLng', [poi.position.latitude, poi.position.longitude]);
-      const payload = new Map<string, Object>();
-      payload.set('pointOfInterest', poiPayload);
-      this.channel.invokeMethod(EVENT_POI_CLICK, payload);
-    });
-
-    controller.on('myLocationClick', (latLng: mapCommon.LatLng) => {
-      const locationPayload = new Map<string, Object>();
-      locationPayload.set('latitude', latLng.latitude);
-      locationPayload.set('longitude', latLng.longitude);
-      const payload = new Map<string, Object>();
-      payload.set('location', locationPayload);
-      this.channel.invokeMethod(EVENT_MY_LOCATION_CLICK, payload);
-    });
-
+    controller.on('cameraMoveStart', this.cameraMoveStartListener);
+    controller.on('cameraMove', this.cameraMoveListener);
+    controller.on('cameraIdle', this.cameraIdleListener);
+    controller.on('mapClick', this.mapClickListener);
+    controller.on('mapLongClick', this.mapLongClickListener);
+    controller.on('poiClick', this.poiClickListener);
+    controller.on('myLocationClick', this.myLocationClickListener);
     this.registerMyLocationButtonClickListener(controller);
+    controller.on('markerClick', this.markerClickListener);
+    controller.on('infoWindowClick', this.infoWindowClickListener);
+    controller.on('infoWindowClose', this.infoWindowCloseListener);
+    controller.on('markerDragStart', this.markerDragStartListener);
+    controller.on('markerDrag', this.markerDragListener);
+    controller.on('markerDragEnd', this.markerDragEndListener);
+  }
 
-    controller.on('markerClick', (marker: map.Marker) => {
-      const flutterId = this.resolveFlutterMarkerId(marker);
-      const payload = new Map<string, Object>();
-      payload.set('markerId', flutterId);
-      this.channel.invokeMethod(EVENT_MARKER_CLICK, payload);
-    });
-
-    controller.on('infoWindowClick', (marker: map.Marker) => {
-      const flutterId = this.resolveFlutterMarkerId(marker);
-      const payload = new Map<string, Object>();
-      payload.set('markerId', flutterId);
-      this.channel.invokeMethod(EVENT_INFO_WINDOW_CLICK, payload);
-    });
-
-    controller.on('infoWindowClose', (marker: map.Marker) => {
-      const flutterId = this.resolveFlutterMarkerId(marker);
-      const payload = new Map<string, Object>();
-      payload.set('markerId', flutterId);
-      this.channel.invokeMethod(EVENT_INFO_WINDOW_CLOSE, payload);
-    });
-
-    controller.on('markerDragStart', (marker: map.Marker) => {
-      const payload = this.createMarkerDragPayload(marker);
-      this.channel.invokeMethod(EVENT_MARKER_DRAG_START, payload);
-    });
-
-    controller.on('markerDrag', (marker: map.Marker) => {
-      const payload = this.createMarkerDragPayload(marker);
-      this.channel.invokeMethod(EVENT_MARKER_DRAG, payload);
-    });
-
-    controller.on('markerDragEnd', (marker: map.Marker) => {
-      const payload = this.createMarkerDragPayload(marker);
-      this.channel.invokeMethod(EVENT_MARKER_DRAG_END, payload);
-    });
+  private unregisterEvents(controller: map.MapComponentController): void {
+    if (!this.eventsRegistered) {
+      return;
+    }
+    // off() is declared as Callback<void>, which does not accept the typed listeners passed to on().
+    const events: ESObject = controller as ESObject;
+    events.off('cameraMoveStart', this.cameraMoveStartListener);
+    events.off('cameraMove', this.cameraMoveListener);
+    events.off('cameraIdle', this.cameraIdleListener);
+    events.off('mapClick', this.mapClickListener);
+    events.off('mapLongClick', this.mapLongClickListener);
+    events.off('poiClick', this.poiClickListener);
+    events.off('myLocationClick', this.myLocationClickListener);
+    if (this.myLocationButtonClickRegistered) {
+      events.off('myLocationButtonClick', this.myLocationButtonClickListener);
+    }
+    events.off('markerClick', this.markerClickListener);
+    events.off('infoWindowClick', this.infoWindowClickListener);
+    events.off('infoWindowClose', this.infoWindowCloseListener);
+    events.off('markerDragStart', this.markerDragStartListener);
+    events.off('markerDrag', this.markerDragListener);
+    events.off('markerDragEnd', this.markerDragEndListener);
+    this.eventsRegistered = false;
+    this.myLocationButtonClickRegistered = false;
   }
 
   private registerMyLocationButtonClickListener(controller: map.MapComponentController): void {
@@ -785,10 +883,7 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
       return;
     }
     this.myLocationButtonClickRegistered = true;
-    controller.on('myLocationButtonClick', (): boolean => {
-      this.channel.invokeMethod(EVENT_MY_LOCATION_BUTTON_CLICK, false);
-      return false;
-    });
+    controller.on('myLocationButtonClick', this.myLocationButtonClickListener);
   }
 
   private resolveFlutterMarkerId(marker: map.Marker): string {
@@ -817,7 +912,12 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
       Log.e(TAG, `Map init failed: ${error.message}`);
       return;
     }
+    if (this.released) {
+      this.shutdownController(controller, false);
+      return;
+    }
     this.controller = controller;
+    this.mapHidden = false;
     this.runtimeState.ready = true;
     const options = this.lastOptions;
     if (options != undefined) {
@@ -842,11 +942,149 @@ export class HmsMapOhosView extends PlatformView implements MethodCallHandler {
     return this.runtimeState.ready;
   }
 
-  dispose(): void {
-    this.channel.setMethodCallHandler(null);
+  getMapReadyCallback(): (error: BusinessError, controller: map.MapComponentController) => void {
+    return this.mapReadyCallback;
+  }
+
+  showMap(): void {
+    const controller = this.controller;
+    if (this.released || controller == undefined || !this.mapHidden) {
+      return;
+    }
+    try {
+      controller.show();
+      this.mapHidden = false;
+    } catch (error) {
+      Log.w(TAG, `map show failed: ${error}`);
+    }
+  }
+
+  hideMap(): void {
+    const controller = this.controller;
+    if (this.released || controller == undefined || this.mapHidden) {
+      return;
+    }
+    try {
+      controller.hide();
+      this.mapHidden = true;
+    } catch (error) {
+      Log.w(TAG, `map hide failed: ${error}`);
+    }
+  }
+
+  detachMap(): void {
+    const controller = this.controller;
     this.controller = undefined;
-    this.eventsRegistered = false;
-    this.myLocationButtonClickRegistered = false;
+    this.runtimeState.ready = false;
+    if (controller != undefined) {
+      this.shutdownController(controller, true);
+    } else {
+      this.releaseOwnedPixelMaps();
+    }
+    this.mapHidden = false;
+  }
+
+  getPlatformViewVisibleAreaEventOptions(): PlatformViewVisibleAreaEventOptions {
+    return {
+      enable: true,
+      ratios: [0.0, 1.0],
+      expectedUpdateInterval: 1000,
+      onInactiveThreshold: 0.0,
+      onActiveThreshold: 1.0,
+    };
+  }
+
+  onInactive(): void {
+    this.hideMap();
+  }
+
+  onActive(): void {
+    this.showMap();
+  }
+
+  dispose(): void {
+    if (this.released) {
+      return;
+    }
+    this.released = true;
+    this.detachMap();
+    this.unregisterAppStateListener();
+    this.channel.setMethodCallHandler(null);
+  }
+
+  private registerAppStateListener(): void {
+    if (this.appStateListening) {
+      return;
+    }
+    const callback = new MapAppStateCallback(this);
+    this.appStateCallback = callback;
+    try {
+      this.context.getApplicationContext().on('applicationStateChange', callback);
+      this.appStateListening = true;
+    } catch (error) {
+      Log.w(TAG, `applicationStateChange register failed: ${error}`);
+    }
+  }
+
+  private unregisterAppStateListener(): void {
+    const callback = this.appStateCallback;
+    if (!this.appStateListening || callback == undefined) {
+      return;
+    }
+    try {
+      this.context.getApplicationContext().off('applicationStateChange', callback);
+    } catch (error) {
+      Log.w(TAG, `applicationStateChange unregister failed: ${error}`);
+    }
+    this.appStateListening = false;
+    this.appStateCallback = undefined;
+  }
+
+  private shutdownController(controller: map.MapComponentController, unregister: boolean): void {
+    try {
+      controller.hide();
+    } catch (error) {
+      Log.w(TAG, `map hide failed: ${error}`);
+    }
+    if (unregister) {
+      try {
+        this.unregisterEvents(controller);
+      } catch (error) {
+        Log.w(TAG, `map listener unregister failed: ${error}`);
+      }
+      this.removeNativeMarkers();
+    }
+    try {
+      controller.clear();
+    } catch (error) {
+      Log.w(TAG, `map clear failed: ${error}`);
+    }
+    this.releaseOwnedPixelMaps();
+  }
+
+  private removeNativeMarkers(): void {
+    for (const flutterId of this.markerByFlutterId.keys()) {
+      const marker = this.markerByFlutterId.get(flutterId);
+      if (marker != undefined) {
+        try {
+          marker.remove();
+        } catch (error) {
+          Log.w(TAG, `marker remove failed: ${error}`);
+        }
+      }
+    }
+    this.markerByFlutterId.clear();
+    this.markerFlutterIdByNativeId.clear();
+  }
+
+  private releaseOwnedPixelMaps(): void {
+    const pixelMaps = this.ownedPixelMaps;
+    this.ownedPixelMaps = [];
+    for (let index = 0; index < pixelMaps.length; index++) {
+      pixelMaps[index].release().catch((error: BusinessError) => {
+        Log.w(TAG, `pixelMap release failed: ${error.message}`);
+      });
+    }
   }
 }
 
@@ -855,11 +1093,15 @@ struct HmsMapNativeView {
   @ObjectLink params: Params;
   mapView: HmsMapOhosView = this.params.platformView as HmsMapOhosView;
 
+  aboutToDisappear(): void {
+    this.mapView.detachMap();
+  }
+
   build() {
     Column() {
       MapComponent({
         mapOptions: this.mapView.getMapOptions(),
-        mapCallback: this.mapView.onMapReady.bind(this.mapView),
+        mapCallback: this.mapView.getMapReadyCallback(),
       })
         .width('100%')
         .height('100%');
@@ -873,3 +1115,21 @@ struct HmsMapNativeView {
 function HmsMapComponentBuilder(params: Params) {
   HmsMapNativeView({ params: params });
 }
+
+class MapAppStateCallback extends ApplicationStateChangeCallback {
+  private readonly owner: HmsMapOhosView;
+
+  constructor(owner: HmsMapOhosView) {
+    super();
+    this.owner = owner;
+  }
+
+  onApplicationForeground(): void {
+    this.owner.showMap();
+  }
+
+  onApplicationBackground(): void {
+    this.owner.hideMap();
+  }
+}
+
